@@ -1,6 +1,6 @@
 # GitHub PR Metrics Reporter
 
-GitHub PR Metrics Reporter tool that generates comprehensive pull request (PR) metrics reports for GitHub users in the josys-src organization. The tool reads usernames from CSV files and produces detailed analytics about PR creation, merge rates, abandonment rates, and merge times.
+GitHub PR Metrics Reporter tool that generates comprehensive pull request (PR) metrics reports for GitHub users in the josys-src organization. The tool reads usernames from CSV files and produces detailed analytics about PR creation, merge rates, abandonment rates, merge times, and code change metrics.
 
 ## Features
 
@@ -10,10 +10,12 @@ GitHub PR Metrics Reporter tool that generates comprehensive pull request (PR) m
   - Total PRs created, merged, open, and abandoned
   - Merge rate and abandonment rate percentages
   - Average merge time in hours
-  - Individual PR details with timestamps
-- **Multiple Output Formats**: Console report + CSV exports
+  - **Code Change Analytics**: Average lines changed per PR, total lines added/deleted
+  - Individual PR details with timestamps and line counts
+- **Multiple Output Formats**: Console report + CSV exports with enhanced line count data
 - **Batch Processing**: Process multiple users from CSV input
 - **Error Handling**: Graceful handling of API errors and missing data
+- **Performance Optimized**: Efficient API calls with individual PR line count fetching
 
 ## Prerequisites
 
@@ -84,11 +86,17 @@ PR METRICS REPORT - josys-src Organization (Last 7 days)
    📊 Merge Rate: 96.7%
    📉 Abandonment Rate: 0.0%
    ⏱️  Average Merge Time: 0.1 hours
+   📏 Average Lines Changed: 106.5
+   ➕ Total Lines Added: 2903
+   ➖ Total Lines Deleted: 717
 
 📈 OVERALL STATISTICS
    Users Processed: 6
    Total PRs Created: 54
    Total PRs Merged: 45
+   Overall Average Lines Changed: 615.8
+   Total Lines Added (All Users): 27897
+   Total Lines Deleted (All Users): 7203
    ...
 ```
 
@@ -102,6 +110,9 @@ Contains aggregated metrics per user:
 - `merge_rate`: Percentage of PRs that were merged
 - `abandonment_rate`: Percentage of PRs that were abandoned
 - `average_merge_time_hours`: Average time from creation to merge
+- `average_lines_changed`: Average lines changed per PR
+- `total_lines_added`: Total lines added across all PRs
+- `total_lines_deleted`: Total lines deleted across all PRs
 - `error`: Any error encountered for this user
 
 ### 3. Detailed CSV (`pr_details.csv`)
@@ -113,6 +124,9 @@ Contains individual PR records with:
 - `created_at`: Creation timestamp
 - `closed_at`: Close/merge timestamp
 - `merge_time_hours`: Time to merge in hours
+- `lines_added`: Lines of code added in this PR
+- `lines_deleted`: Lines of code deleted in this PR
+- `lines_changed`: Total lines changed (added + deleted)
 - `repository`: Repository name
 - `url`: PR URL
 
@@ -138,6 +152,40 @@ python3 gm.py EM-1.csv --days 30
 python3 gm.py team.csv --output ./team_reports/
 ```
 
+## Metrics Definitions
+
+### Core PR Metrics
+- **Created**: PRs authored by the user in the specified time range
+- **Merged**: PRs that were successfully merged
+- **Open**: PRs still awaiting review/merge
+- **Abandoned**: PRs that were closed without merging
+- **Merge Rate**: `(Merged PRs / Total PRs) × 100`
+- **Abandonment Rate**: `(Abandoned PRs / Total PRs) × 100`
+- **Merge Time**: Time from PR creation to merge completion
+
+### Code Change Metrics
+- **Lines Added**: Total lines of code added across all PRs
+- **Lines Deleted**: Total lines of code removed across all PRs
+- **Lines Changed**: Total lines modified (additions + deletions)
+- **Average Lines Changed**: Mean lines changed per PR for the user
+- **Overall Average**: Team-wide average lines changed per PR
+
+### Understanding the Data
+- **Large Line Changes**: May indicate feature development or major refactoring
+- **Small Frequent Changes**: Often suggests bug fixes or incremental improvements
+- **High Merge Rates**: Indicates good code quality and review processes
+- **Fast Merge Times**: Shows efficient review and CI/CD processes
+
+## Error Handling
+
+The tool handles various error scenarios:
+- **Missing GitHub CLI**: Shows installation instructions
+- **Authentication issues**: Prompts to run `gh auth login`
+- **Invalid usernames**: Reports errors in output without stopping
+- **API rate limits**: Gracefully handles GitHub API limitations
+- **Network issues**: Reports connection errors per user
+- **Permission errors**: Handles repositories the user cannot access
+
 ## Troubleshooting
 ### GitHub CLI Issues
 ```bash
@@ -151,6 +199,11 @@ gh auth login
 
 ### Permission Issues
 Ensure your GitHub account has access to the josys-src organization repositories.
+
+### CSV Format Issues
+- Ensure CSV files are UTF-8 encoded
+- Check for extra whitespace in usernames
+- Verify column headers match expected format
 
 ## License
 This project is for internal use within the josys-src organization.
