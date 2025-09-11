@@ -11,6 +11,8 @@ GitHub PR Metrics Reporter tool that generates comprehensive pull request (PR) m
   - Merge rate and abandonment rate percentages
   - Average merge time in hours
   - **Code Change Analytics**: Average lines changed per PR, total lines added/deleted
+  - **Coding Days Analytics**: Count of unique days with at least one commit
+  - Total commit count per user
   - Individual PR details with timestamps and line counts
 - **Multiple Output Formats**: Console report + CSV exports with enhanced line count data
 - **Batch Processing**: Process multiple users from CSV input
@@ -89,6 +91,8 @@ PR METRICS REPORT - josys-src Organization (Last 7 days)
    📏 Average Lines Changed: 106.5
    ➕ Total Lines Added: 2903
    ➖ Total Lines Deleted: 717
+   📅 Coding Days: 5
+   💾 Total Commits: 42
 
 📈 OVERALL STATISTICS
    Users Processed: 6
@@ -97,6 +101,9 @@ PR METRICS REPORT - josys-src Organization (Last 7 days)
    Overall Average Lines Changed: 615.8
    Total Lines Added (All Users): 27897
    Total Lines Deleted (All Users): 7203
+   Total Coding Days (All Users): 35
+   Total Commits (All Users): 133
+   Average Coding Days per User: 5.8
    ...
 ```
 
@@ -113,6 +120,8 @@ Contains aggregated metrics per user:
 - `average_lines_changed`: Average lines changed per PR
 - `total_lines_added`: Total lines added across all PRs
 - `total_lines_deleted`: Total lines deleted across all PRs
+- `coding_days`: Total count of unique calendar days with commits (calculated per week Monday-Sunday)
+- `total_commits`: Total number of commits made by the user
 - `error`: Any error encountered for this user
 
 ### 3. Detailed CSV (`pr_details.csv`)
@@ -170,11 +179,18 @@ python3 gm.py team.csv --output ./team_reports/
 - **Average Lines Changed**: Mean lines changed per PR for the user
 - **Overall Average**: Team-wide average lines changed per PR
 
+### Coding Activity Metrics
+- **Coding Days**: Total count of unique calendar days with commits, calculated per week (Monday-Sunday) across all weeks in the date range
+- **Total Commits**: Total number of commits made by the user in the time period
+- **Average Coding Days**: Team-wide average of coding days per user
+
 ### Understanding the Data
 - **Large Line Changes**: May indicate feature development or major refactoring
 - **Small Frequent Changes**: Often suggests bug fixes or incremental improvements
 - **High Merge Rates**: Indicates good code quality and review processes
 - **Fast Merge Times**: Shows efficient review and CI/CD processes
+- **High Coding Days**: Indicates consistent daily development activity
+- **Regular Commits**: Shows steady development progress and good version control practices
 
 ## Error Handling
 
