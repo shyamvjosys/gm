@@ -5,7 +5,7 @@ GitHub PR Metrics Reporter tool that generates comprehensive pull request (PR) m
 ## Features
 
 - **Comprehensive PR Analysis**: Tracks created, merged, open, and abandoned PRs
-- **Time-based Analysis**: Configurable date range (default: last 7 days)
+- **Time-based Analysis**: Configurable week range (default: last 1 complete week)
 - **Detailed Metrics**: 
   - Total PRs created, merged, open, and abandoned
   - Merge rate and abandonment rate percentages (rounded to 2 decimal places)
@@ -47,14 +47,14 @@ python3 gm.py <csv_file>
 
 ### Advanced Usage
 ```bash
-# Analyze last 14 days instead of default 7
-python3 gm.py usernames.csv --days 14
+# Analyze last 2 weeks instead of default 1
+python3 gm.py usernames.csv --weeks 2
 
 # Specify custom output directory
 python3 gm.py usernames.csv --output ./reports/
 
 # Combine options
-python3 gm.py usernames.csv --days 30 --output ./monthly_reports/
+python3 gm.py usernames.csv --weeks 4 --output ./monthly_reports/
 ```
 
 ### CSV Input Format
@@ -78,7 +78,8 @@ The tool generates three types of output:
 ### 1. Console Report
 Displays formatted metrics for each user and overall statistics:
 ```
-PR METRICS REPORT - josys-src Organization (Last 7 days)
+PR METRICS REPORT - josys-src Organization (Last 1 week)
+Date Range: 2025-08-31 (Sunday) to 2025-09-06 (Saturday)
 ===============================================================================
 
 👤 SuperStar1212
@@ -146,7 +147,7 @@ Contains individual PR records with:
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--days` | `-d` | Number of days to analyze | 7 |
+| `--weeks` | `-w` | Number of weeks to analyze | 1 |
 | `--output` | `-o` | Output directory for CSV files | Current directory |
 | `--help` | `-h` | Show help message | - |
 
@@ -156,8 +157,8 @@ Contains individual PR records with:
 # Analyze last week for Arvind's team
 python3 gm.py org1.csv
 
-# Monthly analysis for teams
-python3 gm.py EM-1.csv --days 30
+# Monthly analysis for teams (4 weeks)
+python3 gm.py EM-1.csv --weeks 4
 
 # Generate reports in specific directory
 python3 gm.py team.csv --output ./team_reports/
