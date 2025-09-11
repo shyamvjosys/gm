@@ -8,8 +8,8 @@ GitHub PR Metrics Reporter tool that generates comprehensive pull request (PR) m
 - **Time-based Analysis**: Configurable date range (default: last 7 days)
 - **Detailed Metrics**: 
   - Total PRs created, merged, open, and abandoned
-  - Merge rate and abandonment rate percentages
-  - Average merge time in hours
+  - Merge rate and abandonment rate percentages (rounded to 2 decimal places)
+  - Average merge time in hours (rounded to 2 decimal places)
   - **Code Change Analytics**: Average lines changed per PR, total lines added/deleted
   - **Coding Days Analytics**: Count of unique days with at least one commit
   - Total commit count per user
@@ -18,6 +18,7 @@ GitHub PR Metrics Reporter tool that generates comprehensive pull request (PR) m
 - **Batch Processing**: Process multiple users from CSV input
 - **Error Handling**: Graceful handling of API errors and missing data
 - **Performance Optimized**: Efficient API calls with individual PR line count fetching
+- **Precise Float Formatting**: All aggregate float values rounded to 2 decimal places for consistency
 
 ## Prerequisites
 
@@ -114,10 +115,10 @@ Contains aggregated metrics per user:
 - `total_merged`: Total PRs merged
 - `total_open`: Total PRs still open
 - `total_abandoned`: Total PRs closed without merge
-- `merge_rate`: Percentage of PRs that were merged
-- `abandonment_rate`: Percentage of PRs that were abandoned
-- `average_merge_time_hours`: Average time from creation to merge
-- `average_lines_changed`: Average lines changed per PR
+- `merge_rate`: Percentage of PRs that were merged (rounded to 2 decimal places)
+- `abandonment_rate`: Percentage of PRs that were abandoned (rounded to 2 decimal places)
+- `average_merge_time_hours`: Average time from creation to merge (rounded to 2 decimal places)
+- `average_lines_changed`: Average lines changed per PR (rounded to 2 decimal places)
 - `total_lines_added`: Total lines added across all PRs
 - `total_lines_deleted`: Total lines deleted across all PRs
 - `coding_days`: Total count of unique calendar days with commits (calculated per week Monday-Sunday)
@@ -127,17 +128,18 @@ Contains aggregated metrics per user:
 ### 3. Detailed CSV (`pr_details.csv`)
 Contains individual PR records with:
 - `username`: GitHub username
-- `pr_number`: PR number
 - `title`: PR title
 - `state`: PR state (open, merged, closed)
 - `created_at`: Creation timestamp
 - `closed_at`: Close/merge timestamp
-- `merge_time_hours`: Time to merge in hours
+- `merge_time_hours`: Time to merge in hours (rounded to 2 decimal places)
 - `lines_added`: Lines of code added in this PR
 - `lines_deleted`: Lines of code deleted in this PR
 - `lines_changed`: Total lines changed (added + deleted)
 - `repository`: Repository name
 - `url`: PR URL
+
+**Note**: The `pr_number` column has been removed from the detailed CSV output for cleaner data presentation.
 
 
 ## Command Line Options
