@@ -12,6 +12,7 @@ GitHub PR Metrics Reporter tool that generates comprehensive pull request (PR) m
   - Average merge time in hours (rounded to 2 decimal places)
   - **Code Change Analytics**: Average lines changed per PR, total lines added/deleted
   - **Coding Days Analytics**: Count of unique days with at least one commit
+  - **P90/P95 Percentile Analytics**: 90th and 95th percentile values for PR merge time and coding days
   - Total commit count per user
   - Individual PR details with timestamps and line counts
 - **Multiple Output Formats**: Console report + CSV exports with enhanced line count data
@@ -100,12 +101,19 @@ Date Range: 2025-08-31 (Sunday) to 2025-09-06 (Saturday)
    Users Processed: 6
    Total PRs Created: 54
    Total PRs Merged: 45
+   Overall Merge Rate: 83.3%
+   Overall Abandonment Rate: 5.6%
+   Overall Average Merge Time: 3.7 hours
+   P90 Merge Time: 19.5 hours
+   P95 Merge Time: 21.3 hours
    Overall Average Lines Changed: 615.8
    Total Lines Added (All Users): 27897
    Total Lines Deleted (All Users): 7203
    Total Coding Days (All Users): 35
    Total Commits (All Users): 133
    Average Coding Days per User: 5.8
+   P90 Coding Days: 6.4 days
+   P95 Coding Days: 6.7 days
    ...
 ```
 
@@ -187,6 +195,13 @@ python3 gm.py team.csv --output ./team_reports/
 - **Total Commits**: Total number of commits made by the user in the time period
 - **Average Coding Days**: Team-wide average of coding days per user
 
+### P90/P95 Percentile Metrics
+- **P90 Merge Time**: The 90th percentile of PR merge times across all PRs - 90% of PRs are merged within this time
+- **P95 Merge Time**: The 95th percentile of PR merge times across all PRs - 95% of PRs are merged within this time
+- **P90 Coding Days**: The 90th percentile of coding days across all users - 90% of users have this many or fewer coding days
+- **P95 Coding Days**: The 95th percentile of coding days across all users - 95% of users have this many or fewer coding days
+- These metrics help identify performance benchmarks and outliers in team productivity
+
 ### Understanding the Data
 - **Large Line Changes**: May indicate feature development or major refactoring
 - **Small Frequent Changes**: Often suggests bug fixes or incremental improvements
@@ -194,6 +209,7 @@ python3 gm.py team.csv --output ./team_reports/
 - **Fast Merge Times**: Shows efficient review and CI/CD processes
 - **High Coding Days**: Indicates consistent daily development activity
 - **Regular Commits**: Shows steady development progress and good version control practices
+- **P90/P95 Metrics**: Use these for setting realistic SLAs and identifying outliers that need attention
 
 ## Error Handling
 
@@ -223,6 +239,20 @@ Ensure your GitHub account has access to the josys-src organization repositories
 - Ensure CSV files are UTF-8 encoded
 - Check for extra whitespace in usernames
 - Verify column headers match expected format
+
+## Changelog
+
+### Latest Updates (September 2025)
+- **Added P90/P95 Percentile Analytics**: New percentile calculations for PR merge time and coding days
+- **Enhanced Overall Statistics**: P90 and P95 values now displayed in console output for better performance insights
+- **Improved Coding Days Calculation**: Fixed issue where coding days were showing as 0 despite commit activity
+- **Better Data Collection**: Enhanced data structures to support percentile calculations across all users
+
+### Previous Updates
+- **Enhanced Code Change Analytics**: Added detailed line count tracking per PR
+- **Coding Days Feature**: Implemented unique coding days calculation based on commit activity
+- **CSV Export Improvements**: Enhanced detailed PR exports with line count data
+- **Performance Optimizations**: Improved API call efficiency for large datasets
 
 ## License
 This project is for internal use within the josys-src organization.

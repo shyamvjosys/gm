@@ -213,6 +213,7 @@ def get_pr_metrics(username: str, weeks: int = 1) -> dict:
                 'lines_deleted': deletions,
                 'lines_changed': lines_changed,
                 'repository': pr.get('repository', {}).get('name', '') if pr.get('repository') else '',
+                'pr_number': pr.get('number', ''),
                 'url': pr.get('url', '')
             }
             metrics['pr_details'].append(pr_detail)
@@ -263,6 +264,32 @@ def get_pr_metrics(username: str, weeks: int = 1) -> dict:
     except FileNotFoundError:
         metrics['error'] = "GitHub CLI (gh) not found"
         return metrics
+
+
+def calculate_percentile(data: list, percentile: float) -> float:
+    """Calculate the specified percentile of a list of numbers"""
+    if not data:
+        return 0.0
+    
+    sorted_data = sorted(data)
+    n = len(sorted_data)
+    
+    # Calculate the index for the percentile
+    index = (percentile / 100.0) * (n - 1)
+    
+    if index == int(index):
+        # Exact index
+        return sorted_data[int(index)]
+    else:
+        # Interpolate between two values
+        lower_index = int(index)
+        upper_index = lower_index + 1
+        
+        if upper_index >= n:
+            return sorted_data[n - 1]
+        
+        weight = index - lower_index
+        return sorted_data[lower_index] * (1 - weight) + sorted_data[upper_index] * weight
 
 
 def load_usernames_from_csv(csv_file: str) -> list:
@@ -344,6 +371,7 @@ def print_report(metrics_list: list, weeks: int):
     total_lines_deleted_global = 0
     total_coding_days = 0
     total_commits_global = 0
+    all_coding_days = []  # Collect individual coding days for percentile calculation
     
     for metrics in metrics_list:
         if metrics['error']:
@@ -359,6 +387,10 @@ def print_report(metrics_list: list, weeks: int):
         total_lines_deleted_global += metrics['total_lines_deleted']
         total_coding_days += metrics['coding_days']
         total_commits_global += metrics['total_commits']
+        
+        # Collect individual coding days for percentile calculation
+        if metrics['coding_days'] > 0:
+            all_coding_days.append(metrics['coding_days'])
         
         # Collect individual PR merge times and line changes for overall calculation
         for pr_detail in metrics.get('pr_details', []):
@@ -397,6 +429,19 @@ def print_report(metrics_list: list, weeks: int):
         if all_lines_changed_global:
             overall_avg_lines_changed = round(sum(all_lines_changed_global) / len(all_lines_changed_global), 2)
         
+        # Calculate P90 and P95 percentiles
+        p90_merge_time = 0.0
+        p95_merge_time = 0.0
+        if all_merge_times:
+            p90_merge_time = round(calculate_percentile(all_merge_times, 90), 2)
+            p95_merge_time = round(calculate_percentile(all_merge_times, 95), 2)
+        
+        p90_coding_days = 0.0
+        p95_coding_days = 0.0
+        if all_coding_days:
+            p90_coding_days = round(calculate_percentile(all_coding_days, 90), 2)
+            p95_coding_days = round(calculate_percentile(all_coding_days, 95), 2)
+        
         print(f"\n📈 OVERALL STATISTICS")
         print(f"   Users Processed: {valid_users}")
         print(f"   Total PRs Created: {total_created}")
@@ -407,6 +452,10 @@ def print_report(metrics_list: list, weeks: int):
         print(f"   Overall Abandonment Rate: {overall_abandonment_rate:.1f}%")
         if overall_avg_merge_time > 0:
             print(f"   Overall Average Merge Time: {overall_avg_merge_time:.1f} hours")
+        if p90_merge_time > 0:
+            print(f"   P90 Merge Time: {p90_merge_time:.1f} hours")
+        if p95_merge_time > 0:
+            print(f"   P95 Merge Time: {p95_merge_time:.1f} hours")
         if overall_avg_lines_changed > 0:
             print(f"   Overall Average Lines Changed: {overall_avg_lines_changed:.1f}")
         print(f"   Total Lines Added (All Users): {total_lines_added_global}")
@@ -416,6 +465,10 @@ def print_report(metrics_list: list, weeks: int):
         if valid_users > 0:
             avg_coding_days = round(total_coding_days / valid_users, 2)
             print(f"   Average Coding Days per User: {avg_coding_days:.2f}")
+        if p90_coding_days > 0:
+            print(f"   P90 Coding Days: {p90_coding_days:.1f} days")
+        if p95_coding_days > 0:
+            print(f"   P95 Coding Days: {p95_coding_days:.1f} days")
 
 
 def save_summary_csv(metrics_list: list, output_file: str, weeks: int):
@@ -444,7 +497,7 @@ def save_detailed_csv(metrics_list: list, output_file: str, weeks: int):
     try:
         with open(output_file, 'w', newline='') as file:
             fieldnames = ['username', 'title', 'state', 'created_at', 'closed_at', 'merge_time_hours', 
-                         'lines_added', 'lines_deleted', 'lines_changed', 'repository', 'url']
+                         'lines_added', 'lines_deleted', 'lines_changed', 'repository', 'pr_number', 'url']
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             
             writer.writeheader()
