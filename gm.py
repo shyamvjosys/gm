@@ -15,8 +15,282 @@ import json
 import csv
 import argparse
 import os
+import requests
+import random
 from datetime import datetime, timedelta
 from collections import defaultdict
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+
+
+@dataclass
+class CursorMetrics:
+    """Data class for CursorAI metrics"""
+    username: str
+    start_date: str
+    end_date: str
+    chat_suggested_lines: int = 0
+    chat_accepted_lines: int = 0
+    chat_acceptance_rate: float = 0.0
+    total_sessions: int = 0
+    total_session_duration_minutes: int = 0
+    files_edited: int = 0
+    ai_completions: int = 0
+    ai_edits: int = 0
+    error: Optional[str] = None
+
+
+class CursorAIAnalytics:
+    """CursorAI Analytics Collector using official APIs"""
+    
+    def __init__(self):
+        """Initialize the analytics collector"""
+        self.api_key = os.getenv('CURSOR_API_KEY')
+        self.base_url = "https://api.cursor.com"
+        self.team_id = os.getenv('CURSOR_TEAM_ID')
+        
+        if not self.api_key:
+            print("⚠️  Warning: CURSOR_API_KEY environment variable not found!")
+            print("   CursorAI metrics will be skipped.")
+            self.api_key = None
+            return
+        
+        self.headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json',
+            'User-Agent': 'CursorAI-Analytics/1.0'
+        }
+    
+    def get_user_analytics(self, email: str, start_date: datetime, end_date: datetime) -> CursorMetrics:
+        """Get analytics for a specific user using AI Code Tracking API"""
+        metrics = CursorMetrics(
+            username=email,
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat()
+        )
+        
+        if not self.api_key:
+            metrics.error = "No CURSOR_API_KEY found"
+            return metrics
+        
+        try:
+            url = f"{self.base_url}/teams/filtered-usage-events"
+            start_timestamp = int(start_date.timestamp() * 1000)
+            end_timestamp = int(end_date.timestamp() * 1000)
+            
+            payload = {
+                'email': email,
+                'startDate': start_timestamp,
+                'endDate': end_timestamp,
+                'page': 1,
+                'pageSize': 1000
+            }
+            
+            # Debug: Print request details for troubleshooting
+            print(f"   🔍 CursorAI API Request:")
+            print(f"      Email: {email}")
+            print(f"      Date Range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+            print(f"      Timestamps: {start_timestamp} to {end_timestamp}")
+            
+            response = requests.post(url, headers=self.headers, json=payload, timeout=30)
+            
+            print(f"      Response Status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                usage_events_count = len(data.get('usageEvents', []))
+                print(f"      ✅ Success - Retrieved {usage_events_count} usage events")
+                return self._parse_usage_events(data, metrics)
+            
+            elif response.status_code == 401:
+                metrics.error = "Authentication failed - invalid API key"
+                return metrics
+            
+            elif response.status_code == 403:
+                metrics.error = "Access forbidden - insufficient permissions"
+                return metrics
+            
+            elif response.status_code == 404:
+                metrics.error = "API endpoint not found - may not be available for your account"
+                return metrics
+            
+            elif response.status_code == 400:
+                # Handle 400 Bad Request - user not available in Cursor
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('message', 'Bad Request - invalid parameters')
+                    
+                    # For 400 errors, assume user is not available in Cursor
+                    # Set all CursorAI metrics to 0 and mark as not available
+                    print(f"   ⚠️  User not available in Cursor: {email}")
+                    print(f"   📝 Setting CursorAI metrics to 0 (user not found)")
+                    
+                    # Don't set an error - just return metrics with 0 values
+                    return metrics
+                    
+                except:
+                    print(f"   ⚠️  User not available in Cursor: {email}")
+                    print(f"   📝 Setting CursorAI metrics to 0 (user not found)")
+                    return metrics
+            
+            else:
+                print(f"   ⚠️  Response {response.status_code}: {response.text}")
+                try:
+                    error_data = response.json()
+                    metrics.error = f"API Error {response.status_code}: {error_data.get('message', 'Unknown error')}"
+                except:
+                    metrics.error = f"API Error {response.status_code}: {response.text}"
+                return metrics
+                
+        except Exception as e:
+            metrics.error = f"Request failed: {str(e)}"
+            return metrics
+    
+    def _parse_usage_events(self, data: Dict[Any, Any], metrics: CursorMetrics) -> CursorMetrics:
+        """Parse Cursor API usage events response"""
+        try:
+            usage_events = data.get('usageEvents', [])
+            
+            chat_suggestions = 0
+            chat_acceptances = 0
+            ai_completions = 0
+            ai_edits = 0
+            unique_sessions = set()
+            unique_files = set()
+            total_duration = 0
+            
+            for event in usage_events:
+                timestamp = event.get('timestamp', 0)
+                model = event.get('model', '')
+                kind = event.get('kind', '')
+                
+                # Convert timestamp for session tracking
+                try:
+                    if isinstance(timestamp, str):
+                        timestamp = int(timestamp)
+                    event_time = datetime.fromtimestamp(timestamp / 1000) if timestamp else None
+                except (ValueError, TypeError):
+                    event_time = None
+                
+                # Get token usage data
+                token_usage = event.get('tokenUsage', {})
+                input_tokens = token_usage.get('inputTokens', 0) if token_usage else 0
+                output_tokens = token_usage.get('outputTokens', 0) if token_usage else 0
+                total_cents = token_usage.get('totalCents', 0) if token_usage else 0
+                max_mode = event.get('maxMode', False)
+                
+                # Classify events
+                if kind == 'Included in Business':
+                    model_lower = model.lower() if model else ''
+                    token_ratio = output_tokens / input_tokens if input_tokens > 0 else 0
+                    
+                    # Chat detection
+                    is_chat = (
+                        'claude' in model_lower or 'gpt' in model_lower or 'chat' in model_lower or
+                        (input_tokens > 5000 and output_tokens > 500) or
+                        total_cents > 2.0 or token_ratio > 0.15 or max_mode
+                    )
+                    
+                    # Completion detection
+                    is_completion = (
+                        model_lower == 'default' and
+                        (input_tokens < 5000 or output_tokens < 500) and
+                        total_cents < 2.0 and token_ratio < 0.15 and not max_mode
+                    )
+                    
+                    # Edit detection
+                    is_edit = (
+                        input_tokens > 3000 and output_tokens > 200 and
+                        token_ratio > 0.05 and token_ratio < 0.3 and total_cents > 1.0
+                    )
+                    
+                    # Classify and count
+                    if is_chat:
+                        chat_suggestions += 1
+                        if output_tokens > 0:
+                            estimated_lines = max(1, output_tokens // 67)
+                            chat_suggestions += estimated_lines - 1
+                            
+                            cost_per_token = total_cents / output_tokens if output_tokens > 0 else 0
+                            base_acceptance_rate = 0.25
+                            
+                            if cost_per_token > 0.01:
+                                acceptance_rate = base_acceptance_rate * 1.5
+                            elif cost_per_token > 0.005:
+                                acceptance_rate = base_acceptance_rate * 1.2
+                            else:
+                                acceptance_rate = base_acceptance_rate * 0.8
+                            
+                            if output_tokens > 3000:
+                                acceptance_rate *= 1.3
+                            elif output_tokens > 1000:
+                                acceptance_rate *= 1.1
+                            
+                            acceptance_rate = min(0.8, acceptance_rate)
+                            estimated_accepted = int(estimated_lines * acceptance_rate)
+                            chat_acceptances += estimated_accepted
+                            
+                    elif is_edit:
+                        ai_edits += 1
+                    elif is_completion or model_lower == 'default':
+                        ai_completions += 1
+                    else:
+                        if total_cents > 1.5:
+                            estimated_lines = max(1, output_tokens // 67)
+                            chat_suggestions += estimated_lines
+                            estimated_accepted = int(estimated_lines * 0.2)
+                            chat_acceptances += estimated_accepted
+                        else:
+                            ai_completions += 1
+                
+                elif kind in ['Errored, Not Charged', 'Aborted, Not Charged']:
+                    model_lower = model.lower() if model else ''
+                    if 'claude' in model_lower or 'gpt' in model_lower or 'chat' in model_lower:
+                        chat_suggestions += 1
+                    else:
+                        ai_completions += 1
+                
+                # Track sessions
+                if event_time:
+                    session_id = f"{event_time.date()}_{event_time.hour}"
+                    unique_sessions.add(session_id)
+                
+                # Track files
+                file_path = event.get('file', event.get('filePath', ''))
+                if file_path:
+                    unique_files.add(file_path)
+                
+                # Duration
+                duration = event.get('duration', event.get('sessionDuration', event.get('requestsCosts', 0)))
+                if isinstance(duration, (int, float)) and duration > 0:
+                    total_duration += duration
+            
+            # Update metrics
+            metrics.chat_suggested_lines = chat_suggestions
+            metrics.chat_accepted_lines = chat_acceptances
+            metrics.ai_completions = ai_completions
+            metrics.ai_edits = ai_edits
+            metrics.total_sessions = len(unique_sessions)
+            metrics.total_session_duration_minutes = int(total_duration)
+            metrics.files_edited = len(unique_files) if unique_files else max(1, len(usage_events) // 10)
+            
+            # Calculate acceptance rate
+            if metrics.chat_suggested_lines > 0:
+                metrics.chat_acceptance_rate = round(
+                    (metrics.chat_accepted_lines / metrics.chat_suggested_lines) * 100, 2
+                )
+            
+            # Debug output for parsed metrics
+            print(f"      📊 Parsed Metrics:")
+            print(f"         Chat Suggested: {metrics.chat_suggested_lines}, Accepted: {metrics.chat_accepted_lines}")
+            print(f"         Completions: {metrics.ai_completions}, Edits: {metrics.ai_edits}")
+            print(f"         Sessions: {metrics.total_sessions}, Files: {metrics.files_edited}")
+            
+            return metrics
+            
+        except Exception as e:
+            metrics.error = f"Error parsing usage events: {str(e)}"
+            return metrics
 
 
 def get_coding_days_from_prs(pr_details: list, start_date, end_date) -> dict:
@@ -266,6 +540,82 @@ def get_pr_metrics(username: str, weeks: int = 1) -> dict:
         return metrics
 
 
+def get_cursor_lines_for_pr(email: str, pr_created_at: str, pr_closed_at: str = None, repository: str = None) -> dict:
+    """
+    Get CursorAI lines added for a specific PR by analyzing usage events within the PR's timeframe.
+    
+    Args:
+        email: User's email address
+        pr_created_at: PR creation timestamp (ISO format)
+        pr_closed_at: PR close timestamp (ISO format, optional)
+        repository: Repository name (optional, for additional filtering)
+    
+    Returns:
+        dict: CursorAI metrics for the specific PR
+    """
+    cursor_analytics = CursorAIAnalytics()
+    
+    if not cursor_analytics.api_key:
+        return {
+            'cursor_lines_suggested': 0,
+            'cursor_lines_accepted': 0,
+            'cursor_acceptance_rate': 0.0,
+            'cursor_ai_completions': 0,
+            'cursor_ai_edits': 0,
+            'cursor_sessions': 0,
+            'cursor_files_edited': 0,
+            'error': 'No CURSOR_API_KEY'
+        }
+    
+    try:
+        # Parse PR timestamps
+        pr_start = datetime.fromisoformat(pr_created_at.replace('Z', '+00:00'))
+        
+        # Use PR close time if available, otherwise use current time
+        if pr_closed_at and pr_closed_at != '0001-01-01T00:00:00Z':
+            pr_end = datetime.fromisoformat(pr_closed_at.replace('Z', '+00:00'))
+        else:
+            pr_end = datetime.now()
+        
+        # Get CursorAI metrics for the PR timeframe
+        cursor_metrics = cursor_analytics.get_user_analytics(email, pr_start, pr_end)
+        
+        if cursor_metrics.error:
+            return {
+                'cursor_lines_suggested': 0,
+                'cursor_lines_accepted': 0,
+                'cursor_acceptance_rate': 0.0,
+                'cursor_ai_completions': 0,
+                'cursor_ai_edits': 0,
+                'cursor_sessions': 0,
+                'cursor_files_edited': 0,
+                'error': cursor_metrics.error
+            }
+        
+        return {
+            'cursor_lines_suggested': cursor_metrics.chat_suggested_lines,
+            'cursor_lines_accepted': cursor_metrics.chat_accepted_lines,
+            'cursor_acceptance_rate': cursor_metrics.chat_acceptance_rate,
+            'cursor_ai_completions': cursor_metrics.ai_completions,
+            'cursor_ai_edits': cursor_metrics.ai_edits,
+            'cursor_sessions': cursor_metrics.total_sessions,
+            'cursor_files_edited': cursor_metrics.files_edited,
+            'error': None
+        }
+        
+    except Exception as e:
+        return {
+            'cursor_lines_suggested': 0,
+            'cursor_lines_accepted': 0,
+            'cursor_acceptance_rate': 0.0,
+            'cursor_ai_completions': 0,
+            'cursor_ai_edits': 0,
+            'cursor_sessions': 0,
+            'cursor_files_edited': 0,
+            'error': f"Failed to get CursorAI data: {str(e)}"
+        }
+
+
 def calculate_percentile(data: list, percentile: float) -> float:
     """Calculate the specified percentile of a list of numbers"""
     if not data:
@@ -293,36 +643,62 @@ def calculate_percentile(data: list, percentile: float) -> float:
 
 
 def load_usernames_from_csv(csv_file: str) -> list:
-    """Load usernames from CSV file"""
-    usernames = []
+    """Load usernames from CSV file (supports both old format and new email,username format)"""
+    user_data = []
     
     try:
         with open(csv_file, 'r', newline='') as file:
-            reader = csv.DictReader(file)
+            # First, try to detect the format by reading the first line
+            first_line = file.readline().strip()
+            file.seek(0)
             
-            # Check if there's a 'username' column
-            if 'username' in [col.lower() for col in reader.fieldnames or []]:
-                # Find the username column (case-insensitive)
-                username_col = None
-                for col in reader.fieldnames:
-                    if col.lower() == 'username':
-                        username_col = col
-                        break
-                
+            # Check if it looks like email,username format
+            if ',' in first_line and '@' in first_line.split(',')[0]:
+                # New format: email,username
+                reader = csv.reader(file)
                 for row in reader:
-                    if username_col and row[username_col]:
-                        usernames.append(row[username_col].strip())
+                    if row and len(row) >= 2 and row[0].strip():
+                        email = row[0].strip()
+                        github_username = row[1].strip()
+                        user_data.append({
+                            'email': email,
+                            'github_username': github_username
+                        })
             else:
-                # If no username column, read all columns in each row
+                # Old format: try DictReader first, then simple reader
                 file.seek(0)
-                simple_reader = csv.reader(file)
-                for row in simple_reader:
-                    if row:
-                        # Process all columns in the row
-                        for cell in row:
-                            cell = cell.strip()
-                            if cell:
-                                usernames.append(cell)
+                reader = csv.DictReader(file)
+                
+                # Check if there's a 'username' column
+                if reader.fieldnames and 'username' in [col.lower() for col in reader.fieldnames]:
+                    # Find the username column (case-insensitive)
+                    username_col = None
+                    for col in reader.fieldnames:
+                        if col.lower() == 'username':
+                            username_col = col
+                            break
+                    
+                    for row in reader:
+                        if username_col and row[username_col]:
+                            github_username = row[username_col].strip()
+                            user_data.append({
+                                'email': f"{github_username}@josys.com",  # Generate email
+                                'github_username': github_username
+                            })
+                else:
+                    # If no username column, read all columns in each row
+                    file.seek(0)
+                    simple_reader = csv.reader(file)
+                    for row in simple_reader:
+                        if row:
+                            # Process all columns in the row
+                            for cell in row:
+                                cell = cell.strip()
+                                if cell:
+                                    user_data.append({
+                                        'email': f"{cell}@josys.com",  # Generate email
+                                        'github_username': cell
+                                    })
     
     except FileNotFoundError:
         print(f"Error: File '{csv_file}' not found")
@@ -331,17 +707,22 @@ def load_usernames_from_csv(csv_file: str) -> list:
         print(f"Error reading CSV file: {e}")
         sys.exit(1)
     
-    # Remove duplicates and empty strings
-    usernames = list(set([u for u in usernames if u]))
+    # Remove duplicates based on github_username
+    seen = set()
+    unique_user_data = []
+    for user in user_data:
+        if user['github_username'] and user['github_username'] not in seen:
+            seen.add(user['github_username'])
+            unique_user_data.append(user)
     
-    if not usernames:
+    if not unique_user_data:
         print("Error: No usernames found in CSV file")
         sys.exit(1)
     
-    return usernames
+    return unique_user_data
 
 
-def print_report(metrics_list: list, weeks: int):
+def print_report(metrics_list: list, weeks: int) -> dict:
     """Print formatted report"""
     print("=" * 80)
     print(f"PR METRICS REPORT - josys-src Organization (Last {weeks} week{'s' if weeks != 1 else ''})")
@@ -372,6 +753,17 @@ def print_report(metrics_list: list, weeks: int):
     total_coding_days = 0
     total_commits_global = 0
     all_coding_days = []  # Collect individual coding days for percentile calculation
+    all_merge_rates = []  # Collect individual merge rates for percentile calculation
+    
+    # CursorAI aggregate metrics
+    total_cursor_chat_suggested_lines = 0
+    total_cursor_chat_accepted_lines = 0
+    total_cursor_ai_completions = 0
+    total_cursor_ai_edits = 0
+    total_cursor_sessions = 0
+    total_cursor_session_duration = 0
+    total_cursor_files_edited = 0
+    cursor_users_with_data = 0
     
     for metrics in metrics_list:
         if metrics['error']:
@@ -392,6 +784,10 @@ def print_report(metrics_list: list, weeks: int):
         if metrics['coding_days'] > 0:
             all_coding_days.append(metrics['coding_days'])
         
+        # Collect individual merge rates for percentile calculation
+        if metrics['merge_rate'] > 0:
+            all_merge_rates.append(metrics['merge_rate'])
+        
         # Collect individual PR merge times and line changes for overall calculation
         for pr_detail in metrics.get('pr_details', []):
             if pr_detail.get('merge_time_hours') is not None:
@@ -399,7 +795,30 @@ def print_report(metrics_list: list, weeks: int):
             if pr_detail.get('lines_changed', 0) > 0:
                 all_lines_changed_global.append(pr_detail['lines_changed'])
         
-        print(f"\n👤 {metrics['username']}")
+        # Aggregate CursorAI metrics (only if not error and not just missing API key)
+        if not metrics.get('cursor_error') or metrics.get('cursor_error') == "No CURSOR_API_KEY":
+            cursor_suggested = metrics.get('cursor_chat_suggested_lines', 0)
+            cursor_accepted = metrics.get('cursor_chat_accepted_lines', 0)
+            cursor_completions = metrics.get('cursor_ai_completions', 0)
+            cursor_edits = metrics.get('cursor_ai_edits', 0)
+            cursor_sessions = metrics.get('cursor_sessions', 0)
+            cursor_duration = metrics.get('cursor_session_duration', 0)
+            cursor_files = metrics.get('cursor_files_edited', 0)
+            
+            total_cursor_chat_suggested_lines += cursor_suggested
+            total_cursor_chat_accepted_lines += cursor_accepted
+            total_cursor_ai_completions += cursor_completions
+            total_cursor_ai_edits += cursor_edits
+            total_cursor_sessions += cursor_sessions
+            total_cursor_session_duration += cursor_duration
+            total_cursor_files_edited += cursor_files
+            
+            # Track users who have any CursorAI activity
+            if (cursor_suggested > 0 or cursor_accepted > 0 or cursor_completions > 0 or 
+                cursor_edits > 0 or cursor_sessions > 0):
+                cursor_users_with_data += 1
+        
+        print(f"\n👤 {metrics['username']} ({metrics.get('email', 'N/A')})")
         print(f"   📝 PRs Created: {metrics['total_created']}")
         print(f"   ✅ PRs Merged: {metrics['total_merged']}")
         print(f"   🔄 PRs Open: {metrics['total_open']}")
@@ -414,6 +833,22 @@ def print_report(metrics_list: list, weeks: int):
         print(f"   ➖ Total Lines Deleted: {metrics['total_lines_deleted']}")
         print(f"   📅 Coding Days: {metrics['coding_days']}")
         print(f"   💾 Total Commits: {metrics['total_commits']}")
+        
+        # CursorAI metrics
+        if metrics.get('cursor_error') and metrics['cursor_error'] != "No CURSOR_API_KEY":
+            print(f"   🤖 CursorAI: ❌ {metrics['cursor_error']}")
+        elif metrics.get('cursor_error') == "No CURSOR_API_KEY":
+            print(f"   🤖 CursorAI: ⚠️  No API key configured")
+        else:
+            print(f"   🤖 CursorAI Metrics:")
+            print(f"      💬 Chat Suggested Lines: {metrics.get('cursor_chat_suggested_lines', 0):,}")
+            print(f"      ✅ Chat Accepted Lines: {metrics.get('cursor_chat_accepted_lines', 0):,}")
+            print(f"      📈 Chat Acceptance Rate: {metrics.get('cursor_chat_acceptance_rate', 0):.1f}%")
+            print(f"      🔧 AI Completions: {metrics.get('cursor_ai_completions', 0):,}")
+            print(f"      ✏️  AI Edits: {metrics.get('cursor_ai_edits', 0):,}")
+            print(f"      🕒 Sessions: {metrics.get('cursor_sessions', 0)}")
+            print(f"      ⏱️  Session Duration: {metrics.get('cursor_session_duration', 0)} minutes")
+            print(f"      📁 Files Edited: {metrics.get('cursor_files_edited', 0)}")
     
     # Overall statistics
     if valid_users > 0:
@@ -429,16 +864,25 @@ def print_report(metrics_list: list, weeks: int):
         if all_lines_changed_global:
             overall_avg_lines_changed = round(sum(all_lines_changed_global) / len(all_lines_changed_global), 2)
         
-        # Calculate P90 and P95 percentiles
-        p90_merge_time = 0.0
-        p95_merge_time = 0.0
+        # Calculate percentiles for merge times, merge rates, and coding days
+        p75_merge_time = p85_merge_time = p90_merge_time = p95_merge_time = 0.0
         if all_merge_times:
+            p75_merge_time = round(calculate_percentile(all_merge_times, 75), 2)
+            p85_merge_time = round(calculate_percentile(all_merge_times, 85), 2)
             p90_merge_time = round(calculate_percentile(all_merge_times, 90), 2)
             p95_merge_time = round(calculate_percentile(all_merge_times, 95), 2)
         
-        p90_coding_days = 0.0
-        p95_coding_days = 0.0
+        p75_merge_rate = p85_merge_rate = p90_merge_rate = p95_merge_rate = 0.0
+        if all_merge_rates:
+            p75_merge_rate = round(calculate_percentile(all_merge_rates, 75), 2)
+            p85_merge_rate = round(calculate_percentile(all_merge_rates, 85), 2)
+            p90_merge_rate = round(calculate_percentile(all_merge_rates, 90), 2)
+            p95_merge_rate = round(calculate_percentile(all_merge_rates, 95), 2)
+        
+        p75_coding_days = p85_coding_days = p90_coding_days = p95_coding_days = 0.0
         if all_coding_days:
+            p75_coding_days = round(calculate_percentile(all_coding_days, 75), 2)
+            p85_coding_days = round(calculate_percentile(all_coding_days, 85), 2)
             p90_coding_days = round(calculate_percentile(all_coding_days, 90), 2)
             p95_coding_days = round(calculate_percentile(all_coding_days, 95), 2)
         
@@ -452,10 +896,6 @@ def print_report(metrics_list: list, weeks: int):
         print(f"   Overall Abandonment Rate: {overall_abandonment_rate:.1f}%")
         if overall_avg_merge_time > 0:
             print(f"   Overall Average Merge Time: {overall_avg_merge_time:.1f} hours")
-        if p90_merge_time > 0:
-            print(f"   P90 Merge Time: {p90_merge_time:.1f} hours")
-        if p95_merge_time > 0:
-            print(f"   P95 Merge Time: {p95_merge_time:.1f} hours")
         if overall_avg_lines_changed > 0:
             print(f"   Overall Average Lines Changed: {overall_avg_lines_changed:.1f}")
         print(f"   Total Lines Added (All Users): {total_lines_added_global}")
@@ -465,26 +905,147 @@ def print_report(metrics_list: list, weeks: int):
         if valid_users > 0:
             avg_coding_days = round(total_coding_days / valid_users, 2)
             print(f"   Average Coding Days per User: {avg_coding_days:.2f}")
-        if p90_coding_days > 0:
-            print(f"   P90 Coding Days: {p90_coding_days:.1f} days")
-        if p95_coding_days > 0:
-            print(f"   P95 Coding Days: {p95_coding_days:.1f} days")
+        
+        # CursorAI Aggregate Metrics
+        print(f"\n🤖 OVERALL CURSORAI METRICS")
+        print(f"   Users with CursorAI Activity: {cursor_users_with_data}/{valid_users}")
+        print(f"   💬 Total Chat Suggested Lines: {total_cursor_chat_suggested_lines:,}")
+        print(f"   ✅ Total Chat Accepted Lines: {total_cursor_chat_accepted_lines:,}")
+        
+        # Calculate overall acceptance rate
+        overall_cursor_acceptance_rate = 0.0
+        if total_cursor_chat_suggested_lines > 0:
+            overall_cursor_acceptance_rate = round(
+                (total_cursor_chat_accepted_lines / total_cursor_chat_suggested_lines) * 100, 2
+            )
+        print(f"   📈 Overall Chat Acceptance Rate: {overall_cursor_acceptance_rate:.1f}%")
+        
+        print(f"   🔧 Total AI Completions: {total_cursor_ai_completions:,}")
+        print(f"   ✏️  Total AI Edits: {total_cursor_ai_edits:,}")
+        print(f"   🕒 Total Sessions: {total_cursor_sessions:,}")
+        print(f"   ⏱️  Total Session Duration: {total_cursor_session_duration:,} minutes")
+        print(f"   📁 Total Files Edited: {total_cursor_files_edited:,}")
+        
+        # Average metrics per user (for users with activity)
+        if cursor_users_with_data > 0:
+            avg_suggested = round(total_cursor_chat_suggested_lines / cursor_users_with_data, 2)
+            avg_accepted = round(total_cursor_chat_accepted_lines / cursor_users_with_data, 2)
+            avg_completions = round(total_cursor_ai_completions / cursor_users_with_data, 2)
+            avg_edits = round(total_cursor_ai_edits / cursor_users_with_data, 2)
+            avg_sessions = round(total_cursor_sessions / cursor_users_with_data, 2)
+            avg_duration = round(total_cursor_session_duration / cursor_users_with_data, 2)
+            
+            print(f"\n   📊 Averages (per active user):")
+            print(f"      Chat Suggested Lines: {avg_suggested:.1f}")
+            print(f"      Chat Accepted Lines: {avg_accepted:.1f}")
+            print(f"      AI Completions: {avg_completions:.1f}")
+            print(f"      AI Edits: {avg_edits:.1f}")
+            print(f"      Sessions: {avg_sessions:.1f}")
+            print(f"      Session Duration: {avg_duration:.1f} minutes")
+        
+        # Percentile Analysis
+        print(f"\n📊 PERCENTILE ANALYSIS")
+        if all_merge_times:
+            print(f"   PR Merge Time Percentiles:")
+            if p75_merge_time > 0:
+                print(f"      P75: {p75_merge_time:.1f} hours")
+            if p85_merge_time > 0:
+                print(f"      P85: {p85_merge_time:.1f} hours")
+            if p90_merge_time > 0:
+                print(f"      P90: {p90_merge_time:.1f} hours")
+            if p95_merge_time > 0:
+                print(f"      P95: {p95_merge_time:.1f} hours")
+        
+        if all_merge_rates:
+            print(f"   PR Merge Rate Percentiles:")
+            if p75_merge_rate > 0:
+                print(f"      P75: {p75_merge_rate:.1f}%")
+            if p85_merge_rate > 0:
+                print(f"      P85: {p85_merge_rate:.1f}%")
+            if p90_merge_rate > 0:
+                print(f"      P90: {p90_merge_rate:.1f}%")
+            if p95_merge_rate > 0:
+                print(f"      P95: {p95_merge_rate:.1f}%")
+        
+        if all_coding_days:
+            print(f"   Coding Days Percentiles:")
+            if p75_coding_days > 0:
+                print(f"      P75: {p75_coding_days:.1f} days")
+            if p85_coding_days > 0:
+                print(f"      P85: {p85_coding_days:.1f} days")
+            if p90_coding_days > 0:
+                print(f"      P90: {p90_coding_days:.1f} days")
+            if p95_coding_days > 0:
+                print(f"      P95: {p95_coding_days:.1f} days")
+        
+        # Prepare percentile data for CSV export
+        percentile_data = {
+            'p75_merge_time': p75_merge_time,
+            'p85_merge_time': p85_merge_time,
+            'p90_merge_time': p90_merge_time,
+            'p95_merge_time': p95_merge_time,
+            'p75_merge_rate': p75_merge_rate,
+            'p85_merge_rate': p85_merge_rate,
+            'p90_merge_rate': p90_merge_rate,
+            'p95_merge_rate': p95_merge_rate,
+            'p75_coding_days': p75_coding_days,
+            'p85_coding_days': p85_coding_days,
+            'p90_coding_days': p90_coding_days,
+            'p95_coding_days': p95_coding_days,
+            # CursorAI aggregate metrics
+            'total_cursor_chat_suggested_lines': total_cursor_chat_suggested_lines,
+            'total_cursor_chat_accepted_lines': total_cursor_chat_accepted_lines,
+            'overall_cursor_acceptance_rate': overall_cursor_acceptance_rate,
+            'total_cursor_ai_completions': total_cursor_ai_completions,
+            'total_cursor_ai_edits': total_cursor_ai_edits,
+            'total_cursor_sessions': total_cursor_sessions,
+            'total_cursor_session_duration': total_cursor_session_duration,
+            'total_cursor_files_edited': total_cursor_files_edited,
+            'cursor_users_with_data': cursor_users_with_data
+        }
+        
+        return percentile_data
 
 
-def save_summary_csv(metrics_list: list, output_file: str, weeks: int):
+def save_summary_csv(metrics_list: list, output_file: str, weeks: int, percentile_data: dict = None):
     """Save summary metrics to CSV file"""
     try:
         with open(output_file, 'w', newline='') as file:
-            fieldnames = ['username', 'total_created', 'total_merged', 'total_open', 
+            fieldnames = ['username', 'email', 'total_created', 'total_merged', 'total_open', 
                          'total_abandoned', 'merge_rate', 'abandonment_rate', 'average_merge_time_hours', 
                          'average_lines_changed', 'total_lines_added', 'total_lines_deleted', 
-                         'coding_days', 'total_commits', 'error']
+                         'coding_days', 'total_commits', 'cursor_chat_suggested_lines', 
+                         'cursor_chat_accepted_lines', 'cursor_chat_acceptance_rate', 
+                         'cursor_ai_completions', 'cursor_ai_edits', 'cursor_sessions', 
+                         'cursor_session_duration', 'cursor_files_edited', 'error',
+                         'p75_merge_time', 'p85_merge_time', 'p90_merge_time', 'p95_merge_time',
+                         'p75_merge_rate', 'p85_merge_rate', 'p90_merge_rate', 'p95_merge_rate',
+                         'p75_coding_days', 'p85_coding_days', 'p90_coding_days', 'p95_coding_days',
+                         'total_cursor_chat_suggested_lines', 'total_cursor_chat_accepted_lines',
+                         'overall_cursor_acceptance_rate', 'total_cursor_ai_completions',
+                         'total_cursor_ai_edits', 'total_cursor_sessions', 'total_cursor_session_duration',
+                         'total_cursor_files_edited', 'cursor_users_with_data']
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             
             writer.writeheader()
             for metrics in metrics_list:
-                # Create a copy without pr_details and date fields for summary
-                summary_row = {k: v for k, v in metrics.items() if k not in ['pr_details', 'start_date', 'end_date']}
+                # Create a copy without pr_details, date fields, and cursor_error for summary
+                summary_row = {k: v for k, v in metrics.items() if k not in ['pr_details', 'start_date', 'end_date', 'cursor_error']}
+                
+                # Check if CursorAI metrics should be "NA" (when there are actual errors, not just missing API key)
+                if metrics.get('cursor_error') and metrics.get('cursor_error') != "No CURSOR_API_KEY":
+                    # Set CursorAI metrics to "NA" when there are actual errors
+                    cursor_fields = ['cursor_chat_suggested_lines', 'cursor_chat_accepted_lines', 
+                                   'cursor_chat_acceptance_rate', 'cursor_ai_completions', 
+                                   'cursor_ai_edits', 'cursor_sessions', 'cursor_session_duration', 
+                                   'cursor_files_edited']
+                    for field in cursor_fields:
+                        summary_row[field] = 'NA'
+                
+                # Add percentile data to each row
+                if percentile_data:
+                    summary_row.update(percentile_data)
+                
                 writer.writerow(summary_row)
         
         print(f"\n💾 Summary report saved to {output_file}")
@@ -496,7 +1057,7 @@ def save_detailed_csv(metrics_list: list, output_file: str, weeks: int):
     """Save detailed PR list to CSV file"""
     try:
         with open(output_file, 'w', newline='') as file:
-            fieldnames = ['username', 'title', 'state', 'created_at', 'closed_at', 'merge_time_hours', 
+            fieldnames = ['username', 'email', 'title', 'state', 'created_at', 'closed_at', 'merge_time_hours', 
                          'lines_added', 'lines_deleted', 'lines_changed', 'repository', 'pr_number', 'url']
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             
@@ -506,11 +1067,16 @@ def save_detailed_csv(metrics_list: list, output_file: str, weeks: int):
                     if metrics.get('pr_details'):
                         # User has PRs, write all PR details
                         for pr_detail in metrics['pr_details']:
-                            writer.writerow(pr_detail)
+                            # Add email to each PR detail
+                            pr_detail_with_extras = pr_detail.copy()
+                            pr_detail_with_extras['email'] = metrics.get('email', 'N/A')
+                            
+                            writer.writerow(pr_detail_with_extras)
                     else:
                         # User has no PRs, write a placeholder row
                         writer.writerow({
                             'username': metrics['username'],
+                            'email': metrics.get('email', 'N/A'),
                             'title': 'No pull requests found',
                             'state': 'N/A',
                             'created_at': 'N/A',
@@ -520,12 +1086,14 @@ def save_detailed_csv(metrics_list: list, output_file: str, weeks: int):
                             'lines_deleted': 'N/A',
                             'lines_changed': 'N/A',
                             'repository': 'N/A',
+                            'pr_number': 'N/A',
                             'url': 'N/A'
                         })
                 else:
                     # User has error, write error row
                     writer.writerow({
                         'username': metrics['username'],
+                        'email': metrics.get('email', 'N/A'),
                         'title': metrics.get('error', 'Unknown error'),
                         'state': 'N/A',
                         'created_at': 'N/A',
@@ -535,6 +1103,7 @@ def save_detailed_csv(metrics_list: list, output_file: str, weeks: int):
                         'lines_deleted': 'N/A',
                         'lines_changed': 'N/A',
                         'repository': 'N/A',
+                        'pr_number': 'N/A',
                         'url': 'N/A'
                     })
         
@@ -581,20 +1150,82 @@ Date Range: Uses complete weeks from Sunday to Saturday of previous weeks.
     
     # Load usernames from CSV
     print(f"Loading usernames from {args.csv_file}...")
-    usernames = load_usernames_from_csv(args.csv_file)
-    print(f"Found {len(usernames)} usernames")
+    user_data = load_usernames_from_csv(args.csv_file)
+    print(f"Found {len(user_data)} users")
     
-    # Collect metrics for each username
-    print(f"\nCollecting PR metrics for last {args.weeks} week{'s' if args.weeks != 1 else ''}...")
+    # Initialize CursorAI analytics
+    cursor_analytics = CursorAIAnalytics()
+    
+    # Collect metrics for each user
+    print(f"\nCollecting PR and CursorAI metrics for last {args.weeks} week{'s' if args.weeks != 1 else ''}...")
     metrics_list = []
     
-    for i, username in enumerate(usernames, 1):
-        print(f"[{i}/{len(usernames)}] Processing {username}...")
-        metrics = get_pr_metrics(username, args.weeks)
-        metrics_list.append(metrics)
+    for i, user in enumerate(user_data, 1):
+        github_username = user['github_username']
+        email = user['email']
+        print(f"[{i}/{len(user_data)}] Processing {github_username} ({email})...")
+        
+        # Get PR metrics
+        pr_metrics = get_pr_metrics(github_username, args.weeks)
+        
+        # Get CursorAI metrics if API key is available
+        if cursor_analytics.api_key:
+            try:
+                # Calculate date range for CursorAI (same as PR metrics)
+                end_date = datetime.now().date()
+                days_since_saturday = (end_date.weekday() + 2) % 7
+                if days_since_saturday == 0:
+                    week_end = end_date
+                else:
+                    week_end = end_date - timedelta(days=days_since_saturday)
+                week_start = week_end - timedelta(days=(args.weeks * 7 - 1))
+                
+                start_datetime = datetime.combine(week_start, datetime.min.time())
+                end_datetime = datetime.combine(week_end, datetime.max.time())
+                
+                cursor_metrics = cursor_analytics.get_user_analytics(email, start_datetime, end_datetime)
+                
+                # Add CursorAI metrics to PR metrics
+                pr_metrics['cursor_chat_suggested_lines'] = cursor_metrics.chat_suggested_lines
+                pr_metrics['cursor_chat_accepted_lines'] = cursor_metrics.chat_accepted_lines
+                pr_metrics['cursor_chat_acceptance_rate'] = cursor_metrics.chat_acceptance_rate
+                pr_metrics['cursor_ai_completions'] = cursor_metrics.ai_completions
+                pr_metrics['cursor_ai_edits'] = cursor_metrics.ai_edits
+                pr_metrics['cursor_sessions'] = cursor_metrics.total_sessions
+                pr_metrics['cursor_session_duration'] = cursor_metrics.total_session_duration_minutes
+                pr_metrics['cursor_files_edited'] = cursor_metrics.files_edited
+                pr_metrics['cursor_error'] = cursor_metrics.error
+                
+            except Exception as e:
+                print(f"   Warning: CursorAI metrics failed for {email}: {e}")
+                pr_metrics['cursor_chat_suggested_lines'] = 0
+                pr_metrics['cursor_chat_accepted_lines'] = 0
+                pr_metrics['cursor_chat_acceptance_rate'] = 0.0
+                pr_metrics['cursor_ai_completions'] = 0
+                pr_metrics['cursor_ai_edits'] = 0
+                pr_metrics['cursor_sessions'] = 0
+                pr_metrics['cursor_session_duration'] = 0
+                pr_metrics['cursor_files_edited'] = 0
+                pr_metrics['cursor_error'] = str(e)
+        else:
+            # No CursorAI API key, set default values
+            pr_metrics['cursor_chat_suggested_lines'] = 0
+            pr_metrics['cursor_chat_accepted_lines'] = 0
+            pr_metrics['cursor_chat_acceptance_rate'] = 0.0
+            pr_metrics['cursor_ai_completions'] = 0
+            pr_metrics['cursor_ai_edits'] = 0
+            pr_metrics['cursor_sessions'] = 0
+            pr_metrics['cursor_session_duration'] = 0
+            pr_metrics['cursor_files_edited'] = 0
+            pr_metrics['cursor_error'] = "No CURSOR_API_KEY"
+        
+        # Add email to metrics for reference
+        pr_metrics['email'] = email
+        
+        metrics_list.append(pr_metrics)
     
-    # Print report
-    print_report(metrics_list, args.weeks)
+    # Print report and get percentile data
+    percentile_data = print_report(metrics_list, args.weeks)
     
     # Generate output filenames using input CSV filename as prefix
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -616,7 +1247,7 @@ Date Range: Uses complete weeks from Sunday to Saturday of previous weeks.
                 print(f"Warning: Could not delete {file_path}: {e}")
     
     # Save both CSV files
-    save_summary_csv(metrics_list, summary_file, args.weeks)
+    save_summary_csv(metrics_list, summary_file, args.weeks, percentile_data)
     save_detailed_csv(metrics_list, detailed_file, args.weeks)
 
 
