@@ -765,6 +765,14 @@ def print_report(metrics_list: list, weeks: int) -> dict:
     total_cursor_files_edited = 0
     cursor_users_with_data = 0
     
+    # CursorAI percentile data collection
+    all_cursor_chat_suggested = []
+    all_cursor_chat_accepted = []
+    all_cursor_ai_completions = []
+    all_cursor_ai_edits = []
+    all_cursor_session_duration = []
+    all_cursor_acceptance_rates = []
+    
     for metrics in metrics_list:
         if metrics['error']:
             print(f"\n❌ {metrics['username']}: {metrics['error']}")
@@ -812,6 +820,23 @@ def print_report(metrics_list: list, weeks: int) -> dict:
             total_cursor_sessions += cursor_sessions
             total_cursor_session_duration += cursor_duration
             total_cursor_files_edited += cursor_files
+            
+            # Collect individual CursorAI metrics for percentile calculation
+            if cursor_suggested > 0:
+                all_cursor_chat_suggested.append(cursor_suggested)
+            if cursor_accepted > 0:
+                all_cursor_chat_accepted.append(cursor_accepted)
+            if cursor_completions > 0:
+                all_cursor_ai_completions.append(cursor_completions)
+            if cursor_edits > 0:
+                all_cursor_ai_edits.append(cursor_edits)
+            if cursor_duration > 0:
+                all_cursor_session_duration.append(cursor_duration)
+            
+            # Collect acceptance rate for percentile calculation
+            acceptance_rate = metrics.get('cursor_chat_acceptance_rate', 0.0)
+            if acceptance_rate > 0:
+                all_cursor_acceptance_rates.append(acceptance_rate)
             
             # Track users who have any CursorAI activity
             if (cursor_suggested > 0 or cursor_accepted > 0 or cursor_completions > 0 or 
@@ -885,6 +910,49 @@ def print_report(metrics_list: list, weeks: int) -> dict:
             p85_coding_days = round(calculate_percentile(all_coding_days, 85), 2)
             p90_coding_days = round(calculate_percentile(all_coding_days, 90), 2)
             p95_coding_days = round(calculate_percentile(all_coding_days, 95), 2)
+        
+        # Calculate percentiles for CursorAI metrics
+        p75_cursor_chat_suggested = p85_cursor_chat_suggested = p90_cursor_chat_suggested = p95_cursor_chat_suggested = 0.0
+        if all_cursor_chat_suggested:
+            p75_cursor_chat_suggested = round(calculate_percentile(all_cursor_chat_suggested, 75), 2)
+            p85_cursor_chat_suggested = round(calculate_percentile(all_cursor_chat_suggested, 85), 2)
+            p90_cursor_chat_suggested = round(calculate_percentile(all_cursor_chat_suggested, 90), 2)
+            p95_cursor_chat_suggested = round(calculate_percentile(all_cursor_chat_suggested, 95), 2)
+        
+        p75_cursor_chat_accepted = p85_cursor_chat_accepted = p90_cursor_chat_accepted = p95_cursor_chat_accepted = 0.0
+        if all_cursor_chat_accepted:
+            p75_cursor_chat_accepted = round(calculate_percentile(all_cursor_chat_accepted, 75), 2)
+            p85_cursor_chat_accepted = round(calculate_percentile(all_cursor_chat_accepted, 85), 2)
+            p90_cursor_chat_accepted = round(calculate_percentile(all_cursor_chat_accepted, 90), 2)
+            p95_cursor_chat_accepted = round(calculate_percentile(all_cursor_chat_accepted, 95), 2)
+        
+        p75_cursor_completions = p85_cursor_completions = p90_cursor_completions = p95_cursor_completions = 0.0
+        if all_cursor_ai_completions:
+            p75_cursor_completions = round(calculate_percentile(all_cursor_ai_completions, 75), 2)
+            p85_cursor_completions = round(calculate_percentile(all_cursor_ai_completions, 85), 2)
+            p90_cursor_completions = round(calculate_percentile(all_cursor_ai_completions, 90), 2)
+            p95_cursor_completions = round(calculate_percentile(all_cursor_ai_completions, 95), 2)
+        
+        p75_cursor_edits = p85_cursor_edits = p90_cursor_edits = p95_cursor_edits = 0.0
+        if all_cursor_ai_edits:
+            p75_cursor_edits = round(calculate_percentile(all_cursor_ai_edits, 75), 2)
+            p85_cursor_edits = round(calculate_percentile(all_cursor_ai_edits, 85), 2)
+            p90_cursor_edits = round(calculate_percentile(all_cursor_ai_edits, 90), 2)
+            p95_cursor_edits = round(calculate_percentile(all_cursor_ai_edits, 95), 2)
+        
+        p75_cursor_duration = p85_cursor_duration = p90_cursor_duration = p95_cursor_duration = 0.0
+        if all_cursor_session_duration:
+            p75_cursor_duration = round(calculate_percentile(all_cursor_session_duration, 75), 2)
+            p85_cursor_duration = round(calculate_percentile(all_cursor_session_duration, 85), 2)
+            p90_cursor_duration = round(calculate_percentile(all_cursor_session_duration, 90), 2)
+            p95_cursor_duration = round(calculate_percentile(all_cursor_session_duration, 95), 2)
+        
+        p75_cursor_accept_rate = p85_cursor_accept_rate = p90_cursor_accept_rate = p95_cursor_accept_rate = 0.0
+        if all_cursor_acceptance_rates:
+            p75_cursor_accept_rate = round(calculate_percentile(all_cursor_acceptance_rates, 75), 2)
+            p85_cursor_accept_rate = round(calculate_percentile(all_cursor_acceptance_rates, 85), 2)
+            p90_cursor_accept_rate = round(calculate_percentile(all_cursor_acceptance_rates, 90), 2)
+            p95_cursor_accept_rate = round(calculate_percentile(all_cursor_acceptance_rates, 95), 2)
         
         print(f"\n📈 OVERALL STATISTICS")
         print(f"   Users Processed: {valid_users}")
@@ -978,6 +1046,73 @@ def print_report(metrics_list: list, weeks: int) -> dict:
             if p95_coding_days > 0:
                 print(f"      P95: {p95_coding_days:.1f} days")
         
+        # CursorAI Percentiles
+        if all_cursor_chat_suggested:
+            print(f"   CursorAI Chat Suggested Lines Percentiles:")
+            if p75_cursor_chat_suggested > 0:
+                print(f"      P75: {p75_cursor_chat_suggested:,.1f} lines")
+            if p85_cursor_chat_suggested > 0:
+                print(f"      P85: {p85_cursor_chat_suggested:,.1f} lines")
+            if p90_cursor_chat_suggested > 0:
+                print(f"      P90: {p90_cursor_chat_suggested:,.1f} lines")
+            if p95_cursor_chat_suggested > 0:
+                print(f"      P95: {p95_cursor_chat_suggested:,.1f} lines")
+        
+        if all_cursor_chat_accepted:
+            print(f"   CursorAI Chat Accepted Lines Percentiles:")
+            if p75_cursor_chat_accepted > 0:
+                print(f"      P75: {p75_cursor_chat_accepted:,.1f} lines")
+            if p85_cursor_chat_accepted > 0:
+                print(f"      P85: {p85_cursor_chat_accepted:,.1f} lines")
+            if p90_cursor_chat_accepted > 0:
+                print(f"      P90: {p90_cursor_chat_accepted:,.1f} lines")
+            if p95_cursor_chat_accepted > 0:
+                print(f"      P95: {p95_cursor_chat_accepted:,.1f} lines")
+        
+        if all_cursor_ai_completions:
+            print(f"   CursorAI AI Completions Percentiles:")
+            if p75_cursor_completions > 0:
+                print(f"      P75: {p75_cursor_completions:,.1f} completions")
+            if p85_cursor_completions > 0:
+                print(f"      P85: {p85_cursor_completions:,.1f} completions")
+            if p90_cursor_completions > 0:
+                print(f"      P90: {p90_cursor_completions:,.1f} completions")
+            if p95_cursor_completions > 0:
+                print(f"      P95: {p95_cursor_completions:,.1f} completions")
+        
+        if all_cursor_ai_edits:
+            print(f"   CursorAI AI Edits Percentiles:")
+            if p75_cursor_edits > 0:
+                print(f"      P75: {p75_cursor_edits:,.1f} edits")
+            if p85_cursor_edits > 0:
+                print(f"      P85: {p85_cursor_edits:,.1f} edits")
+            if p90_cursor_edits > 0:
+                print(f"      P90: {p90_cursor_edits:,.1f} edits")
+            if p95_cursor_edits > 0:
+                print(f"      P95: {p95_cursor_edits:,.1f} edits")
+        
+        if all_cursor_session_duration:
+            print(f"   CursorAI Session Duration Percentiles:")
+            if p75_cursor_duration > 0:
+                print(f"      P75: {p75_cursor_duration:,.1f} minutes")
+            if p85_cursor_duration > 0:
+                print(f"      P85: {p85_cursor_duration:,.1f} minutes")
+            if p90_cursor_duration > 0:
+                print(f"      P90: {p90_cursor_duration:,.1f} minutes")
+            if p95_cursor_duration > 0:
+                print(f"      P95: {p95_cursor_duration:,.1f} minutes")
+        
+        if all_cursor_acceptance_rates:
+            print(f"   CursorAI Chat Acceptance Rate Percentiles:")
+            if p75_cursor_accept_rate > 0:
+                print(f"      P75: {p75_cursor_accept_rate:.1f}%")
+            if p85_cursor_accept_rate > 0:
+                print(f"      P85: {p85_cursor_accept_rate:.1f}%")
+            if p90_cursor_accept_rate > 0:
+                print(f"      P90: {p90_cursor_accept_rate:.1f}%")
+            if p95_cursor_accept_rate > 0:
+                print(f"      P95: {p95_cursor_accept_rate:.1f}%")
+        
         # Prepare percentile data for CSV export
         percentile_data = {
             'p75_merge_time': p75_merge_time,
@@ -1001,7 +1136,32 @@ def print_report(metrics_list: list, weeks: int) -> dict:
             'total_cursor_sessions': total_cursor_sessions,
             'total_cursor_session_duration': total_cursor_session_duration,
             'total_cursor_files_edited': total_cursor_files_edited,
-            'cursor_users_with_data': cursor_users_with_data
+            'cursor_users_with_data': cursor_users_with_data,
+            # CursorAI percentiles
+            'p75_cursor_chat_suggested': p75_cursor_chat_suggested,
+            'p85_cursor_chat_suggested': p85_cursor_chat_suggested,
+            'p90_cursor_chat_suggested': p90_cursor_chat_suggested,
+            'p95_cursor_chat_suggested': p95_cursor_chat_suggested,
+            'p75_cursor_chat_accepted': p75_cursor_chat_accepted,
+            'p85_cursor_chat_accepted': p85_cursor_chat_accepted,
+            'p90_cursor_chat_accepted': p90_cursor_chat_accepted,
+            'p95_cursor_chat_accepted': p95_cursor_chat_accepted,
+            'p75_cursor_completions': p75_cursor_completions,
+            'p85_cursor_completions': p85_cursor_completions,
+            'p90_cursor_completions': p90_cursor_completions,
+            'p95_cursor_completions': p95_cursor_completions,
+            'p75_cursor_edits': p75_cursor_edits,
+            'p85_cursor_edits': p85_cursor_edits,
+            'p90_cursor_edits': p90_cursor_edits,
+            'p95_cursor_edits': p95_cursor_edits,
+            'p75_cursor_duration': p75_cursor_duration,
+            'p85_cursor_duration': p85_cursor_duration,
+            'p90_cursor_duration': p90_cursor_duration,
+            'p95_cursor_duration': p95_cursor_duration,
+            'p75_cursor_accept_rate': p75_cursor_accept_rate,
+            'p85_cursor_accept_rate': p85_cursor_accept_rate,
+            'p90_cursor_accept_rate': p90_cursor_accept_rate,
+            'p95_cursor_accept_rate': p95_cursor_accept_rate
         }
         
         return percentile_data
@@ -1024,7 +1184,13 @@ def save_summary_csv(metrics_list: list, output_file: str, weeks: int, percentil
                          'total_cursor_chat_suggested_lines', 'total_cursor_chat_accepted_lines',
                          'overall_cursor_acceptance_rate', 'total_cursor_ai_completions',
                          'total_cursor_ai_edits', 'total_cursor_sessions', 'total_cursor_session_duration',
-                         'total_cursor_files_edited', 'cursor_users_with_data']
+                         'total_cursor_files_edited', 'cursor_users_with_data',
+                         'p75_cursor_chat_suggested', 'p85_cursor_chat_suggested', 'p90_cursor_chat_suggested', 'p95_cursor_chat_suggested',
+                         'p75_cursor_chat_accepted', 'p85_cursor_chat_accepted', 'p90_cursor_chat_accepted', 'p95_cursor_chat_accepted',
+                         'p75_cursor_completions', 'p85_cursor_completions', 'p90_cursor_completions', 'p95_cursor_completions',
+                         'p75_cursor_edits', 'p85_cursor_edits', 'p90_cursor_edits', 'p95_cursor_edits',
+                         'p75_cursor_duration', 'p85_cursor_duration', 'p90_cursor_duration', 'p95_cursor_duration',
+                         'p75_cursor_accept_rate', 'p85_cursor_accept_rate', 'p90_cursor_accept_rate', 'p95_cursor_accept_rate']
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             
             writer.writeheader()
