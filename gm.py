@@ -1168,35 +1168,24 @@ def print_report(metrics_list: list, weeks: int) -> dict:
 
 
 def save_summary_csv(metrics_list: list, output_file: str, weeks: int, percentile_data: dict = None):
-    """Save summary metrics to CSV file"""
+    """Save summary metrics to CSV file with aggregate metrics as separate rows"""
     try:
         with open(output_file, 'w', newline='') as file:
+            # Per-user data columns (no aggregate/percentile columns)
             fieldnames = ['username', 'email', 'total_created', 'total_merged', 'total_open', 
                          'total_abandoned', 'merge_rate', 'abandonment_rate', 'average_merge_time_hours', 
                          'average_lines_changed', 'total_lines_added', 'total_lines_deleted', 
                          'coding_days', 'total_commits', 'cursor_chat_suggested_lines', 
                          'cursor_chat_accepted_lines', 'cursor_chat_acceptance_rate', 
                          'cursor_ai_completions', 'cursor_ai_edits', 'cursor_sessions', 
-                         'cursor_session_duration', 'cursor_files_edited', 'error',
-                         'p75_merge_time', 'p85_merge_time', 'p90_merge_time', 'p95_merge_time',
-                         'p75_merge_rate', 'p85_merge_rate', 'p90_merge_rate', 'p95_merge_rate',
-                         'p75_coding_days', 'p85_coding_days', 'p90_coding_days', 'p95_coding_days',
-                         'total_cursor_chat_suggested_lines', 'total_cursor_chat_accepted_lines',
-                         'overall_cursor_acceptance_rate', 'total_cursor_ai_completions',
-                         'total_cursor_ai_edits', 'total_cursor_sessions', 'total_cursor_session_duration',
-                         'total_cursor_files_edited', 'cursor_users_with_data',
-                         'p75_cursor_chat_suggested', 'p85_cursor_chat_suggested', 'p90_cursor_chat_suggested', 'p95_cursor_chat_suggested',
-                         'p75_cursor_chat_accepted', 'p85_cursor_chat_accepted', 'p90_cursor_chat_accepted', 'p95_cursor_chat_accepted',
-                         'p75_cursor_completions', 'p85_cursor_completions', 'p90_cursor_completions', 'p95_cursor_completions',
-                         'p75_cursor_edits', 'p85_cursor_edits', 'p90_cursor_edits', 'p95_cursor_edits',
-                         'p75_cursor_duration', 'p85_cursor_duration', 'p90_cursor_duration', 'p95_cursor_duration',
-                         'p75_cursor_accept_rate', 'p85_cursor_accept_rate', 'p90_cursor_accept_rate', 'p95_cursor_accept_rate']
+                         'cursor_session_duration', 'cursor_files_edited', 'error']
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             
             writer.writeheader()
             for metrics in metrics_list:
-                # Create a copy without pr_details, date fields, and cursor_error for summary
-                summary_row = {k: v for k, v in metrics.items() if k not in ['pr_details', 'start_date', 'end_date', 'cursor_error']}
+                # Create a copy without pr_details, date fields, cursor_error, and aggregate data
+                summary_row = {k: v for k, v in metrics.items() 
+                             if k in fieldnames and k not in ['pr_details', 'start_date', 'end_date', 'cursor_error']}
                 
                 # Check if CursorAI metrics should be "NA" (when there are actual errors, not just missing API key)
                 if metrics.get('cursor_error') and metrics.get('cursor_error') != "No CURSOR_API_KEY":
@@ -1208,11 +1197,89 @@ def save_summary_csv(metrics_list: list, output_file: str, weeks: int, percentil
                     for field in cursor_fields:
                         summary_row[field] = 'NA'
                 
-                # Add percentile data to each row
-                if percentile_data:
-                    summary_row.update(percentile_data)
-                
                 writer.writerow(summary_row)
+            
+            # Add empty row as separator
+            file.write('\n')
+            
+            # Add aggregate metrics as separate rows with 2-column format
+            if percentile_data:
+                file.write('AGGREGATE METRICS\n')
+                file.write('Metric,Value\n')
+                
+                # PR Merge Time Percentiles
+                if percentile_data.get('p75_merge_time', 0) > 0:
+                    file.write('PR Merge Time P75 (hours),{}\n'.format(percentile_data['p75_merge_time']))
+                    file.write('PR Merge Time P85 (hours),{}\n'.format(percentile_data['p85_merge_time']))
+                    file.write('PR Merge Time P90 (hours),{}\n'.format(percentile_data['p90_merge_time']))
+                    file.write('PR Merge Time P95 (hours),{}\n'.format(percentile_data['p95_merge_time']))
+                
+                # PR Merge Rate Percentiles
+                if percentile_data.get('p75_merge_rate', 0) > 0:
+                    file.write('PR Merge Rate P75 (%),{}\n'.format(percentile_data['p75_merge_rate']))
+                    file.write('PR Merge Rate P85 (%),{}\n'.format(percentile_data['p85_merge_rate']))
+                    file.write('PR Merge Rate P90 (%),{}\n'.format(percentile_data['p90_merge_rate']))
+                    file.write('PR Merge Rate P95 (%),{}\n'.format(percentile_data['p95_merge_rate']))
+                
+                # Coding Days Percentiles
+                if percentile_data.get('p75_coding_days', 0) > 0:
+                    file.write('Coding Days P75,{}\n'.format(percentile_data['p75_coding_days']))
+                    file.write('Coding Days P85,{}\n'.format(percentile_data['p85_coding_days']))
+                    file.write('Coding Days P90,{}\n'.format(percentile_data['p90_coding_days']))
+                    file.write('Coding Days P95,{}\n'.format(percentile_data['p95_coding_days']))
+                
+                # CursorAI Aggregate Metrics
+                file.write('Total CursorAI Users with Data,{}\n'.format(percentile_data.get('cursor_users_with_data', 0)))
+                file.write('Total CursorAI Chat Suggested Lines,{}\n'.format(percentile_data.get('total_cursor_chat_suggested_lines', 0)))
+                file.write('Total CursorAI Chat Accepted Lines,{}\n'.format(percentile_data.get('total_cursor_chat_accepted_lines', 0)))
+                file.write('Overall CursorAI Acceptance Rate (%),{}\n'.format(percentile_data.get('overall_cursor_acceptance_rate', 0)))
+                file.write('Total CursorAI Completions,{}\n'.format(percentile_data.get('total_cursor_ai_completions', 0)))
+                file.write('Total CursorAI Edits,{}\n'.format(percentile_data.get('total_cursor_ai_edits', 0)))
+                file.write('Total CursorAI Sessions,{}\n'.format(percentile_data.get('total_cursor_sessions', 0)))
+                file.write('Total CursorAI Session Duration (minutes),{}\n'.format(percentile_data.get('total_cursor_session_duration', 0)))
+                file.write('Total CursorAI Files Edited,{}\n'.format(percentile_data.get('total_cursor_files_edited', 0)))
+                
+                # CursorAI Chat Suggested Lines Percentiles
+                if percentile_data.get('p75_cursor_chat_suggested', 0) > 0:
+                    file.write('CursorAI Chat Suggested Lines P75,{}\n'.format(percentile_data['p75_cursor_chat_suggested']))
+                    file.write('CursorAI Chat Suggested Lines P85,{}\n'.format(percentile_data['p85_cursor_chat_suggested']))
+                    file.write('CursorAI Chat Suggested Lines P90,{}\n'.format(percentile_data['p90_cursor_chat_suggested']))
+                    file.write('CursorAI Chat Suggested Lines P95,{}\n'.format(percentile_data['p95_cursor_chat_suggested']))
+                
+                # CursorAI Chat Accepted Lines Percentiles
+                if percentile_data.get('p75_cursor_chat_accepted', 0) > 0:
+                    file.write('CursorAI Chat Accepted Lines P75,{}\n'.format(percentile_data['p75_cursor_chat_accepted']))
+                    file.write('CursorAI Chat Accepted Lines P85,{}\n'.format(percentile_data['p85_cursor_chat_accepted']))
+                    file.write('CursorAI Chat Accepted Lines P90,{}\n'.format(percentile_data['p90_cursor_chat_accepted']))
+                    file.write('CursorAI Chat Accepted Lines P95,{}\n'.format(percentile_data['p95_cursor_chat_accepted']))
+                
+                # CursorAI Completions Percentiles
+                if percentile_data.get('p75_cursor_completions', 0) > 0:
+                    file.write('CursorAI Completions P75,{}\n'.format(percentile_data['p75_cursor_completions']))
+                    file.write('CursorAI Completions P85,{}\n'.format(percentile_data['p85_cursor_completions']))
+                    file.write('CursorAI Completions P90,{}\n'.format(percentile_data['p90_cursor_completions']))
+                    file.write('CursorAI Completions P95,{}\n'.format(percentile_data['p95_cursor_completions']))
+                
+                # CursorAI Edits Percentiles
+                if percentile_data.get('p75_cursor_edits', 0) > 0:
+                    file.write('CursorAI Edits P75,{}\n'.format(percentile_data['p75_cursor_edits']))
+                    file.write('CursorAI Edits P85,{}\n'.format(percentile_data['p85_cursor_edits']))
+                    file.write('CursorAI Edits P90,{}\n'.format(percentile_data['p90_cursor_edits']))
+                    file.write('CursorAI Edits P95,{}\n'.format(percentile_data['p95_cursor_edits']))
+                
+                # CursorAI Session Duration Percentiles
+                if percentile_data.get('p75_cursor_duration', 0) > 0:
+                    file.write('CursorAI Session Duration P75 (minutes),{}\n'.format(percentile_data['p75_cursor_duration']))
+                    file.write('CursorAI Session Duration P85 (minutes),{}\n'.format(percentile_data['p85_cursor_duration']))
+                    file.write('CursorAI Session Duration P90 (minutes),{}\n'.format(percentile_data['p90_cursor_duration']))
+                    file.write('CursorAI Session Duration P95 (minutes),{}\n'.format(percentile_data['p95_cursor_duration']))
+                
+                # CursorAI Acceptance Rate Percentiles
+                if percentile_data.get('p75_cursor_accept_rate', 0) > 0:
+                    file.write('CursorAI Acceptance Rate P75 (%),{}\n'.format(percentile_data['p75_cursor_accept_rate']))
+                    file.write('CursorAI Acceptance Rate P85 (%),{}\n'.format(percentile_data['p85_cursor_accept_rate']))
+                    file.write('CursorAI Acceptance Rate P90 (%),{}\n'.format(percentile_data['p90_cursor_accept_rate']))
+                    file.write('CursorAI Acceptance Rate P95 (%),{}\n'.format(percentile_data['p95_cursor_accept_rate']))
         
         print(f"\n💾 Summary report saved to {output_file}")
     except Exception as e:

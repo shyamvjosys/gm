@@ -7,6 +7,7 @@ Uses environment variables for configuration
 
 import os
 import sys
+import csv
 import argparse
 from datetime import datetime, timedelta
 from atlassian import Jira
@@ -219,6 +220,17 @@ def analyze_board_metrics(jira, project_key, start_date, end_date, extended=Fals
     """Analyze metrics for a specific board/project"""
     print(f"\n📋 Analyzing {project_key} project...")
     
+    # Get project name
+    project_name = project_key
+    try:
+        project_details = jira.project(project_key)
+        project_name = project_details.get('name', project_key)
+    except Exception:
+        pass
+    
+    # Get base URL for constructing links
+    base_url = os.getenv('JIRA_URL', 'https://josysglobal.atlassian.net')
+    
     # Get release versions
     versions = get_release_versions(jira, project_key, start_date, end_date)
     
@@ -239,6 +251,9 @@ def analyze_board_metrics(jira, project_key, start_date, end_date, extended=Fals
         release_date = version.get('releaseDate', 'No release date')
         released = version.get('released', False)
         
+        # Construct JIRA version link
+        version_link = f"{base_url}/projects/{project_key}/versions/{version_id}"
+        
         if released:
             released_count += 1
         else:
@@ -256,11 +271,13 @@ def analyze_board_metrics(jira, project_key, start_date, end_date, extended=Fals
             'release_date': release_date,
             'released': released,
             'total_tickets': total_tickets,
-            'done_tickets': done_tickets
+            'done_tickets': done_tickets,
+            'version_link': version_link
         })
     
     return {
         'project_key': project_key,
+        'project_name': project_name,
         'total_versions': total_versions,
         'released_count': released_count,
         'unreleased_count': unreleased_count,
@@ -283,10 +300,10 @@ def print_summary_report(project_metrics, start_date, end_date, weeks, extended=
             print(f"\n📋 {project} PROJECT - RELEASE VERSIONS")
             
             if extended:
-                # Extended mode: include ticket information
-                print("-" * 100)
-                print("Release Name                    | Status    | Release Date | Total Tickets | Done Tickets | Open Tickets")
-                print("-" * 100)
+                # Extended mode: include ticket information and link
+                print("-" * 120)
+                print("Release Name                    | Status    | Release Date | Total Tickets | Done Tickets | Link")
+                print("-" * 120)
                 
                 for version in metrics['version_details']:
                     name = version['name'][:30]  # Truncate long names
@@ -294,20 +311,21 @@ def print_summary_report(project_metrics, start_date, end_date, weeks, extended=
                     release_date = version['release_date'] if version['release_date'] != 'No release date' else 'Not Set'
                     total_tickets = version['total_tickets']
                     done_tickets = version['done_tickets']
-                    open_tickets = max(0, total_tickets - done_tickets)
+                    version_link = version.get('version_link', 'N/A')
                     
-                    print(f"{name:30} | {status:9} | {release_date:12} | {total_tickets:13} | {done_tickets:12} | {open_tickets:12}")
+                    print(f"{name:30} | {status:9} | {release_date:12} | {total_tickets:13} | {done_tickets:12} | {version_link}")
             else:
-                # Basic mode: only release versions, status, and release date
-                print("-" * 80)
-                print("Release Name                    | Status      | Release Date")
-                print("-" * 80)
+                # Basic mode: release versions, status, release date, and link
+                print("-" * 120)
+                print("Release Name                    | Status      | Release Date | Link")
+                print("-" * 120)
                 
                 for version in metrics['version_details']:
                     name = version['name'][:30]  # Truncate long names
                     status = "Released" if version['released'] else "Unreleased"
                     release_date = version['release_date'] if version['release_date'] != 'No release date' else 'Not Set'
-                    print(f"{name:30} | {status:11} | {release_date:12}")
+                    version_link = version.get('version_link', 'N/A')
+                    print(f"{name:30} | {status:11} | {release_date:12} | {version_link}")
     
     # Overall Statistics
     total_versions_all = sum(m['total_versions'] for m in project_metrics if m)
@@ -345,6 +363,38 @@ def print_summary_report(project_metrics, start_date, end_date, weeks, extended=
             overall_completion_rate = (total_done_all / total_tickets_all) * 100
             print(f"Overall Completion Rate   | {overall_completion_rate:.1f}%")
 
+def save_releases_csv(project_metrics, output_file):
+    """Save release versions to CSV file with all required columns"""
+    try:
+        with open(output_file, 'w', newline='', encoding='utf-8') as file:
+            fieldnames = ['project_name', 'project_key', 'release_version', 'status', 
+                         'release_date', 'jira_link']
+            
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for metrics in project_metrics:
+                if metrics and metrics['version_details']:
+                    project_name = metrics.get('project_name', metrics['project_key'])
+                    project_key = metrics['project_key']
+                    
+                    for version in metrics['version_details']:
+                        row = {
+                            'project_name': project_name,
+                            'project_key': project_key,
+                            'release_version': version['name'],
+                            'status': 'Released' if version['released'] else 'Unreleased',
+                            'release_date': version['release_date'] if version['release_date'] != 'No release date' else 'Not Set',
+                            'jira_link': version.get('version_link', 'N/A')
+                        }
+                        writer.writerow(row)
+        
+        print(f"\n💾 Release versions exported to {output_file}")
+        return True
+    except Exception as e:
+        print(f"⚠️  Error saving CSV: {e}")
+        return False
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate JIRA metrics summary for release versions",
@@ -358,6 +408,10 @@ Examples:
 
 The script analyzes active JIRA projects for release metrics.
 Use --extended for detailed ticket analysis.
+
+Output:
+  - Console report with release versions and links
+  - CSV file: jira-releases.csv (project name, key, version, status, date, link)
         """
     )
     
@@ -466,6 +520,11 @@ Use --extended for detailed ticket analysis.
         
         # Print comprehensive report
         print_summary_report(project_metrics, start_date, end_date, args.weeks, args.extended)
+        
+        # Save CSV file with release versions
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if os.path.dirname(os.path.abspath(__file__)) else '.'
+        csv_file = os.path.join(script_dir, "jira-releases.csv")
+        save_releases_csv(project_metrics, csv_file)
         
     except Exception as e:
         error_msg = str(e).lower()
